@@ -161,14 +161,21 @@
             margin: 10px 0;
             text-align: center;
         }
-        .demo-warning {
+        .warning-message {
             background: #fff3cd;
             color: #856404;
             padding: 10px;
             border-radius: 5px;
             margin: 10px 0;
             text-align: center;
-            font-size: 14px;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
         }
     </style>
 </head>
@@ -179,16 +186,20 @@
             <p>Выбери прокладку</p>
         </div>
         
-        <div class="demo-warning" id="demoWarning" style="display: none;">
-            🔸 Демо-режим: данные сохраняются только локально
+        <div class="warning-message" id="warningMessage" style="display: none;">
+            ⚠️ Этот функционал работает только в Telegram
         </div>
         
         <div class="info-message" id="infoMessage">
-            🌸 Добро пожаловать! Выбери прокладку чтобы начать.
+            🔄 Загружаем данные из базы...
         </div>
         
         <div class="success-message" id="successMessage" style="display: none;">
             ✅ Данные успешно обновлены!
+        </div>
+
+        <div class="error-message" id="errorMessage" style="display: none;">
+            ❌ Ошибка соединения с ботом
         </div>
         
         <div class="stats">
@@ -224,13 +235,12 @@
             </div>
         </div>
         
-        <button class="button" onclick="showHelp()">❓ Как это работает</button>
+        <button class="button" onclick="requestStats()">🔄 Запросить статистику</button>
         <button class="button reset" onclick="resetData()">🔁 Сбросить всё</button>
     </div>
 
     <script>
         let currentPad = null;
-        let currentTotalML = 0;
         let isTelegram = false;
         
         // URL изображений прокладок
@@ -242,7 +252,23 @@
             5: "https://directc.github.io/bot/images/pad5.png"
         };
         
+        function requestStats() {
+            if (isTelegram) {
+                showInfoMessage("📊 Запрашиваем актуальные данные из базы...");
+                Telegram.WebApp.sendData(JSON.stringify({
+                    action: 'get_stats'
+                }));
+            } else {
+                showWarningMessage("⚠️ Функционал доступен только в Telegram");
+            }
+        }
+        
         function selectPad(padNumber) {
+            if (!isTelegram) {
+                showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
+                return;
+            }
+            
             currentPad = padNumber;
             
             if (padNumber === 1) {
@@ -293,11 +319,7 @@
             const modal = document.querySelector('.modal');
             if (modal) modal.remove();
             
-            // Обновляем локальную статистику
-            currentTotalML += ml;
-            updateDisplay();
-            
-            // Отправляем данные в бота (если в Telegram)
+            // Отправляем данные в бота для сохранения в БД
             if (isTelegram) {
                 Telegram.WebApp.sendData(JSON.stringify({
                     action: 'add_pad',
@@ -306,19 +328,25 @@
                     ml: ml
                 }));
                 
-                showSuccessMessage(`✅ Добавлено ${ml} мл! Проверь чат с ботом для подтверждения.`);
+                showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
+                
+                // Разблокируем интерфейс через 2 секунды
+                setTimeout(() => {
+                    setLoading(false);
+                    // После добавления запрашиваем актуальную статистику
+                    setTimeout(() => {
+                        requestStats();
+                    }, 1000);
+                }, 2000);
+                
             } else {
-                showSuccessMessage(`✅ Добавлено ${ml} мл (демо-режим)`);
-            }
-            
-            // Разблокируем интерфейс через 1 секунду
-            setTimeout(() => {
+                showErrorMessage("❌ Невозможно сохранить данные вне Telegram");
                 setLoading(false);
-            }, 1000);
+            }
         }
         
-        function updateDisplay() {
-            document.getElementById('totalML').textContent = currentTotalML + ' мл';
+        function updateDisplay(totalML) {
+            document.getElementById('totalML').textContent = totalML + ' мл';
         }
         
         function setLoading(loading) {
@@ -335,22 +363,38 @@
         }
         
         function showSuccessMessage(message) {
+            hideAllMessages();
             const successMsg = document.getElementById('successMessage');
-            const infoMsg = document.getElementById('infoMessage');
-            infoMsg.style.display = 'none';
             successMsg.textContent = message;
             successMsg.style.display = 'block';
-            
-            setTimeout(() => {
-                successMsg.style.display = 'none';
-                infoMsg.style.display = 'block';
-            }, 3000);
         }
         
         function showInfoMessage(message) {
+            hideAllMessages();
             const infoMsg = document.getElementById('infoMessage');
             infoMsg.textContent = message;
             infoMsg.style.display = 'block';
+        }
+        
+        function showWarningMessage(message) {
+            hideAllMessages();
+            const warningMsg = document.getElementById('warningMessage');
+            warningMsg.textContent = message;
+            warningMsg.style.display = 'block';
+        }
+        
+        function showErrorMessage(message) {
+            hideAllMessages();
+            const errorMsg = document.getElementById('errorMessage');
+            errorMsg.textContent = message;
+            errorMsg.style.display = 'block';
+        }
+        
+        function hideAllMessages() {
+            document.getElementById('successMessage').style.display = 'none';
+            document.getElementById('infoMessage').style.display = 'none';
+            document.getElementById('warningMessage').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
         }
         
         function getDayML(padNumber) {
@@ -364,20 +408,21 @@
         }
         
         function resetData() {
-            if (confirm('Точно сбросить все данные?')) {
-                if (isTelegram) {
-                    Telegram.WebApp.sendData(JSON.stringify({
-                        action: 'reset'
-                    }));
-                }
-                currentTotalML = 0;
-                updateDisplay();
-                showSuccessMessage("Данные сброшены!");
+            if (!isTelegram) {
+                showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
+                return;
             }
-        }
-        
-        function showHelp() {
-            alert("📋 Как пользоваться:\n\n1. Выбери тип прокладки\n2. Для прокладок 2-5 выбери дневной или ночной тип\n3. Данные автоматически сохраняются\n4. В Telegram данные сохраняются в базе бота\n5. В демо-режиме данные сохраняются только локально");
+            
+            if (confirm('Точно сбросить все данные в базе?')) {
+                Telegram.WebApp.sendData(JSON.stringify({
+                    action: 'reset'
+                }));
+                showInfoMessage("🔄 Сбрасываем данные в базе...");
+                // После сброса запрашиваем актуальную статистику
+                setTimeout(() => {
+                    requestStats();
+                }, 1000);
+            }
         }
         
         // Инициализация веб-приложения
@@ -386,15 +431,16 @@
             Telegram.WebApp.ready();
             Telegram.WebApp.expand();
             
-            showInfoMessage("🌸 Готов к работе! Выбери прокладку.");
+            showInfoMessage("✅ Подключено к базе данных через бота");
+            // При открытии запрашиваем актуальные данные
+            setTimeout(() => {
+                requestStats();
+            }, 1000);
             
         } else {
-            document.getElementById('demoWarning').style.display = 'block';
-            showInfoMessage("🔸 Демо-режим: данные сохраняются только в этом окне");
+            showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
+            document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
         }
-        
-        // Инициализация отображения
-        updateDisplay();
     </script>
 </body>
 </html>
