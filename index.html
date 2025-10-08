@@ -316,10 +316,15 @@
             debugLog('Запрос статистики...');
             if (isTelegram) {
                 showInfoMessage("📊 Запрашиваем актуальные данные из базы...");
-                Telegram.WebApp.sendData(JSON.stringify({
-                    action: 'get_stats'
-                }));
-                debugLog('Данные отправлены через Telegram WebApp: get_stats');
+                
+                sendToBotAPI('get_stats', {}).then(success => {
+                    if (success) {
+                        debugLog('Запрос статистики отправлен');
+                    } else {
+                        showErrorMessage("❌ Ошибка запроса статистики");
+                    }
+                });
+                
             } else {
                 debugLog('Не в Telegram окружении');
                 showWarningMessage("⚠️ Функционал доступен только в Telegram");
@@ -374,6 +379,35 @@
             document.body.appendChild(modal);
         }
         
+        async function sendToBotAPI(action, data) {
+            const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
+            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            
+            const messageData = {
+                chat_id: Telegram.WebApp.initDataUnsafe.user?.id,
+                text: `ACTION:${action}|${JSON.stringify(data)}`,
+                parse_mode: 'HTML'
+            };
+            
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(messageData)
+                });
+                
+                const result = await response.json();
+                debugLog('Ответ от Bot API: ' + JSON.stringify(result));
+                return result.ok;
+            } catch (error) {
+                debugLog('Ошибка Bot API: ' + error);
+                return false;
+            }
+        }
+
+        // Обновите функцию addPad
         function addPad(padNumber, type) {
             const ml = type === 'day' ? getDayML(padNumber) : getNightML(padNumber);
             debugLog(`Добавление прокладки: №${padNumber}, тип=${type}, мл=${ml}`);
@@ -385,40 +419,34 @@
             const modal = document.querySelector('.modal');
             if (modal) modal.remove();
             
-            // Отправляем данные в бота для сохранения в БД
+            // Отправляем данные через Bot API
             if (isTelegram) {
                 const data = {
-                    action: 'add_pad',
                     pad_number: padNumber,
                     type: type,
                     ml: ml
                 };
                 
-                debugLog('Попытка отправки данных в бота: ' + JSON.stringify(data));
+                debugLog('Попытка отправки данных через Bot API: ' + JSON.stringify(data));
                 
-                try {
-                    Telegram.WebApp.sendData(JSON.stringify(data));
-                    debugLog('✅ Данные успешно отправлены через Telegram WebApp');
-                    
-                    showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
-                    
-                    // Ждем ответа от бота
-                    setTimeout(() => {
-                        setLoading(false);
-                        showSuccessMessage(`✅ Данные отправлены! Проверьте чат с ботом для подтверждения.`);
+                sendToBotAPI('add_pad', data).then(success => {
+                    if (success) {
+                        showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
                         
-                        // Автоматически запрашиваем обновленную статистику через 3 секунды
                         setTimeout(() => {
-                            debugLog('Автоматический запрос статистики после добавления прокладки');
-                            requestStats();
-                        }, 3000);
-                    }, 2000);
-                    
-                } catch (error) {
-                    debugLog('❌ Ошибка при отправке данных: ' + error);
-                    setLoading(false);
-                    showErrorMessage("❌ Ошибка отправки данных в бота");
-                }
+                            setLoading(false);
+                            showSuccessMessage(`✅ Данные успешно добавлены!`);
+                            
+                            // Обновляем статистику
+                            setTimeout(() => {
+                                requestStats();
+                            }, 1000);
+                        }, 2000);
+                    } else {
+                        setLoading(false);
+                        showErrorMessage("❌ Ошибка отправки данных");
+                    }
+                });
                 
             } else {
                 showErrorMessage("❌ Невозможно сохранить данные вне Telegram");
@@ -541,11 +569,16 @@
             }
             
             if (confirm('Точно сбросить все данные в базе?')) {
-                Telegram.WebApp.sendData(JSON.stringify({
-                    action: 'reset'
-                }));
-                debugLog('Отправлен запрос на сброс данных');
-                showInfoMessage("🔄 Сбрасываем данные в базе...");
+                sendToBotAPI('reset', {}).then(success => {
+                    if (success) {
+                        showInfoMessage("🔄 Сбрасываем данные в базе...");
+                        setTimeout(() => {
+                            requestStats();
+                        }, 2000);
+                    } else {
+                        showErrorMessage("❌ Ошибка сброса данных");
+                    }
+                });
             }
         }
         
