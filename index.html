@@ -599,7 +599,13 @@
                     requestStats();
                 }, 1000);
             }
-            
+            // === ДОБАВЬТЕ ЗДЕСЬ ===
+            debugLog('Инициализация завершена');
+            debugLog('isTelegram: ' + isTelegram);
+            debugLog('WebApp version: ' + Telegram.WebApp.version);
+            debugLog('Platform: ' + Telegram.WebApp.platform);
+            debugLog('User ID: ' + (Telegram.WebApp.initDataUnsafe.user?.id || 'не доступно'));
+            // === КОНЕЦ ДОБАВЛЕНИЯ ===
         } else {
             debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
             showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
