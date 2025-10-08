@@ -394,22 +394,74 @@
                     ml: ml
                 };
                 
-                Telegram.WebApp.sendData(JSON.stringify(data));
-                debugLog('Данные отправлены в бота: ' + JSON.stringify(data));
+                debugLog('Попытка отправки данных в бота: ' + JSON.stringify(data));
                 
-                showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
-                
-                // Разблокируем интерфейс через 2 секунды
-                setTimeout(() => {
+                try {
+                    Telegram.WebApp.sendData(JSON.stringify(data));
+                    debugLog('✅ Данные успешно отправлены через Telegram WebApp');
+                    
+                    showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
+                    
+                    // Ждем ответа от бота
+                    setTimeout(() => {
+                        setLoading(false);
+                        showSuccessMessage(`✅ Данные отправлены! Проверьте чат с ботом для подтверждения.`);
+                        
+                        // Автоматически запрашиваем обновленную статистику через 3 секунды
+                        setTimeout(() => {
+                            debugLog('Автоматический запрос статистики после добавления прокладки');
+                            requestStats();
+                        }, 3000);
+                    }, 2000);
+                    
+                } catch (error) {
+                    debugLog('❌ Ошибка при отправке данных: ' + error);
                     setLoading(false);
-                    showSuccessMessage(`✅ Данные отправлены! Проверьте чат с ботом для подтверждения.`);
-                }, 2000);
+                    showErrorMessage("❌ Ошибка отправки данных в бота");
+                }
                 
             } else {
                 showErrorMessage("❌ Невозможно сохранить данные вне Telegram");
                 setLoading(false);
             }
         }
+    
+    // Добавьте эту функцию для проверки состояния бота
+    function checkBotStatus() {
+        debugLog('Проверка статуса бота...');
+        // Можно добавить ping или другую проверку
+    }
+    
+    // Добавьте в конец инициализации
+    if (window.Telegram && Telegram.WebApp) {
+        isTelegram = true;
+        Telegram.WebApp.ready();
+        Telegram.WebApp.expand();
+        
+        debugLog('Telegram WebApp инициализирован');
+        debugLog('Версия Telegram WebApp: ' + Telegram.WebApp.version);
+        debugLog('Платформа: ' + Telegram.WebApp.platform);
+        
+        // Проверяем параметры URL для автоматического обновления
+        const params = getUrlParams();
+        if (params.refresh) {
+            const totalML = parseInt(params.refresh);
+            updateDisplay(totalML);
+            showSuccessMessage(`✅ Данные обновлены: ${totalML} мл`);
+            debugLog(`Автоматическое обновление из URL: ${totalML} мл`);
+        } else {
+            showInfoMessage("✅ Подключено к базе данных через бота");
+            // При открытии запрашиваем актуальные данные
+            setTimeout(() => {
+                requestStats();
+            }, 1000);
+        }
+        
+    } else {
+        debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
+        showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
+        document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
+    }
         
         function updateDisplay(totalML) {
             currentTotalML = totalML;
