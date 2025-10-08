@@ -384,11 +384,12 @@
             
             if (!isTelegram) {
                 debugLog('Не в Telegram окружении - эмуляция отправки');
-                return true; // Для тестирования вне Telegram
+                // Для тестирования вне Telegram
+                showSuccessMessage(`✅ Эмуляция: ${action} отправлен`);
+                return true;
             }
             
             try {
-                // Используем WebApp Data для отправки данных
                 const webAppData = {
                     action: action,
                     ...data
@@ -396,7 +397,7 @@
                 
                 debugLog('Отправка данных через WebApp: ' + JSON.stringify(webAppData));
                 
-                // Отправляем данные через Telegram WebApp
+                // Правильный способ отправки данных
                 Telegram.WebApp.sendData(JSON.stringify(webAppData));
                 
                 debugLog('Данные успешно отправлены через WebApp');
@@ -404,6 +405,7 @@
                 
             } catch (error) {
                 debugLog('Ошибка отправки через WebApp: ' + error);
+                showErrorMessage('❌ Ошибка отправки данных');
                 return false;
             }
         }
@@ -420,39 +422,23 @@
             const modal = document.querySelector('.modal');
             if (modal) modal.remove();
             
-            // Отправляем данные через Bot API
-            if (isTelegram) {
-                const data = {
-                    pad_number: padNumber,
-                    type: type,
-                    ml: ml
-                };
-                
-                debugLog('Попытка отправки данных через Bot API: ' + JSON.stringify(data));
-                
-                sendToBotAPI('add_pad', data).then(success => {
-                    if (success) {
-                        showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
-                        
-                        setTimeout(() => {
-                            setLoading(false);
-                            showSuccessMessage(`✅ Данные успешно добавлены!`);
-                            
-                            // Обновляем статистику
-                            setTimeout(() => {
-                                requestStats();
-                            }, 1000);
-                        }, 2000);
-                    } else {
-                        setLoading(false);
-                        showErrorMessage("❌ Ошибка отправки данных");
-                    }
-                });
-                
-            } else {
-                showErrorMessage("❌ Невозможно сохранить данные вне Telegram");
-                setLoading(false);
-            }
+            const data = {
+                pad_number: padNumber,
+                type: type,
+                ml: ml
+            };
+            
+            debugLog('Отправка данных: ' + JSON.stringify(data));
+            
+            sendToBotAPI('add_pad', data).then(success => {
+                if (success) {
+                    showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
+                    // WebApp закроется после отправки данных
+                } else {
+                    setLoading(false);
+                    showErrorMessage("❌ Ошибка отправки данных");
+                }
+            });
         }
     
     // Добавьте эту функцию для проверки состояния бота
