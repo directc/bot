@@ -333,6 +333,9 @@
         
         function selectPad(padNumber) {
             debugLog(`Выбрана прокладка №${padNumber}`);
+            debugLog(`isTelegram: ${isTelegram}`);
+            debugLog(`Telegram.WebApp: ${typeof Telegram.WebApp}`);
+            
             if (!isTelegram) {
                 showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
                 return;
@@ -396,6 +399,8 @@
                 };
                 
                 debugLog('Отправка данных через WebApp: ' + JSON.stringify(webAppData));
+                debugLog('Telegram.WebApp доступен: ' + (typeof Telegram.WebApp !== 'undefined'));
+                debugLog('Telegram.WebApp.sendData доступен: ' + (typeof Telegram.WebApp.sendData !== 'undefined'));
                 
                 // Правильный способ отправки данных
                 Telegram.WebApp.sendData(JSON.stringify(webAppData));
@@ -405,7 +410,9 @@
                 
             } catch (error) {
                 debugLog('Ошибка отправки через WebApp: ' + error);
-                showErrorMessage('❌ Ошибка отправки данных');
+                debugLog('Тип ошибки: ' + typeof error);
+                debugLog('Стек ошибки: ' + error.stack);
+                showErrorMessage('❌ Ошибка отправки данных: ' + error.message);
                 return false;
             }
         }
