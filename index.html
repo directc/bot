@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
+        /* Стили остаются такими же */
         body {
             font-family: Arial, sans-serif;
             background: linear-gradient(135deg, #ffb6c1, #ff69b4);
@@ -261,12 +262,14 @@
         
         <button class="button" onclick="requestStats()">🔄 Запросить статистику</button>
         <button class="button reset" onclick="resetData()">🔁 Сбросить всё</button>
+        <button class="button" onclick="closeWebApp()" style="background: #28a745;">✅ Готово</button>
     </div>
 
     <script>
         let currentPad = null;
         let isTelegram = false;
         let debugMode = false;
+        let currentTotalML = 0;
         
         // URL изображений прокладок
         const padImages = {
@@ -292,6 +295,21 @@
             const debugInfo = document.getElementById('debugInfo');
             debugInfo.style.display = debugMode ? 'block' : 'none';
             debugLog('Режим отладки ' + (debugMode ? 'включен' : 'выключен'));
+        }
+        
+        // Функция для получения параметров из URL
+        function getUrlParams() {
+            const params = {};
+            const queryString = window.location.search.substring(1);
+            const pairs = queryString.split('&');
+            
+            for (let i = 0; i < pairs.length; i++) {
+                const pair = pairs[i].split('=');
+                if (pair[0]) {
+                    params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1] || '');
+                }
+            }
+            return params;
         }
         
         function requestStats() {
@@ -384,10 +402,7 @@
                 // Разблокируем интерфейс через 2 секунды
                 setTimeout(() => {
                     setLoading(false);
-                    // После добавления запрашиваем актуальную статистику
-                    setTimeout(() => {
-                        requestStats();
-                    }, 1000);
+                    showSuccessMessage(`✅ Данные отправлены! Проверьте чат с ботом для подтверждения.`);
                 }, 2000);
                 
             } else {
@@ -397,6 +412,7 @@
         }
         
         function updateDisplay(totalML) {
+            currentTotalML = totalML;
             document.getElementById('totalML').textContent = totalML + ' мл';
             debugLog(`Обновление отображения: ${totalML} мл`);
         }
@@ -478,10 +494,14 @@
                 }));
                 debugLog('Отправлен запрос на сброс данных');
                 showInfoMessage("🔄 Сбрасываем данные в базе...");
-                // После сброса запрашиваем актуальную статистику
-                setTimeout(() => {
-                    requestStats();
-                }, 1000);
+            }
+        }
+        
+        function closeWebApp() {
+            if (isTelegram) {
+                Telegram.WebApp.close();
+            } else {
+                showInfoMessage("✅ Работа завершена");
             }
         }
         
@@ -492,25 +512,26 @@
             Telegram.WebApp.expand();
             
             debugLog('Telegram WebApp инициализирован');
-            showInfoMessage("✅ Подключено к базе данных через бота");
             
-            // При открытии запрашиваем актуальные данные
-            setTimeout(() => {
-                requestStats();
-            }, 1000);
+            // Проверяем параметры URL для автоматического обновления
+            const params = getUrlParams();
+            if (params.refresh) {
+                const totalML = parseInt(params.refresh);
+                updateDisplay(totalML);
+                showSuccessMessage(`✅ Данные обновлены: ${totalML} мл`);
+                debugLog(`Автоматическое обновление из URL: ${totalML} мл`);
+            } else {
+                showInfoMessage("✅ Подключено к базе данных через бота");
+                // При открытии запрашиваем актуальные данные
+                setTimeout(() => {
+                    requestStats();
+                }, 1000);
+            }
             
         } else {
             debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
             showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
             document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
-        }
-        
-        // Имитация ответов от бота для тестирования
-        function simulateBotResponse(totalML) {
-            if (!isTelegram) {
-                updateDisplay(totalML);
-                showSuccessMessage(`✅ Тестовые данные: ${totalML} мл`);
-            }
         }
     </script>
 </body>
