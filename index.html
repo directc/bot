@@ -152,7 +152,14 @@
             border-radius: 5px;
             margin: 10px 0;
             text-align: center;
-            display: none;
+        }
+        .info-message {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
         }
     </style>
 </head>
@@ -163,13 +170,17 @@
             <p>Выбери прокладку</p>
         </div>
         
-        <div class="success-message" id="successMessage">
+        <div class="info-message" id="infoMessage">
+            📊 Загрузка статистики...
+        </div>
+        
+        <div class="success-message" id="successMessage" style="display: none;">
             ✅ Данные успешно обновлены!
         </div>
         
         <div class="stats">
             <div>Всего собрано:</div>
-            <div class="stats-value" id="totalML">Загрузка...</div>
+            <div class="stats-value" id="totalML">0 мл</div>
         </div>
         
         <div class="pad-grid" id="padGrid">
@@ -217,15 +228,15 @@
             5: "https://directc.github.io/bot/images/pad5.png"
         };
         
-        // Функция для обновления статистики
+        // Функция для обновления статистики из БД
         function refreshStats() {
             if (window.Telegram && Telegram.WebApp) {
+                showInfoMessage("🔄 Запрашиваем актуальные данные...");
                 Telegram.WebApp.sendData(JSON.stringify({
                     action: 'get_stats'
                 }));
-                showSuccessMessage("Запрос статистики отправлен! Проверьте чат с ботом.");
             } else {
-                alert('Функция доступна в Telegram');
+                showInfoMessage("📊 Текущая статистика: " + currentTotalML + " мл (демо-режим)");
             }
         }
         
@@ -280,10 +291,7 @@
             const modal = document.querySelector('.modal');
             if (modal) modal.remove();
             
-            // Обновляем локальную статистику (оптимистичное обновление)
-            updateLocalStats(ml);
-            
-            // Отправляем данные в бота
+            // Отправляем данные в бота (это обновит БД)
             if (window.Telegram && Telegram.WebApp) {
                 Telegram.WebApp.sendData(JSON.stringify({
                     action: 'add_pad',
@@ -292,22 +300,28 @@
                     ml: ml
                 }));
                 
-                showSuccessMessage(`✅ Добавлено ${ml} мл! Данные отправлены в бот.`);
+                // НЕ обновляем локальную статистику сразу - ждем подтверждения от бота
+                showInfoMessage(`📤 Отправляем данные в бот: ${ml} мл...`);
                 
                 // Разблокируем интерфейс через 2 секунды
                 setTimeout(() => {
                     setLoading(false);
+                    // После добавления запрашиваем актуальную статистику
+                    setTimeout(() => {
+                        refreshStats();
+                    }, 500);
                 }, 2000);
                 
             } else {
                 // Демо-режим
+                currentTotalML += ml;
+                updateDisplay();
                 showSuccessMessage(`✅ Добавлено ${ml} мл (демо-режим)`);
                 setLoading(false);
             }
         }
         
-        function updateLocalStats(ml) {
-            currentTotalML += ml;
+        function updateDisplay() {
             document.getElementById('totalML').textContent = currentTotalML + ' мл';
         }
         
@@ -326,12 +340,22 @@
         
         function showSuccessMessage(message) {
             const successMsg = document.getElementById('successMessage');
+            const infoMsg = document.getElementById('infoMessage');
+            infoMsg.style.display = 'none';
             successMsg.textContent = message;
             successMsg.style.display = 'block';
             
             setTimeout(() => {
                 successMsg.style.display = 'none';
             }, 3000);
+        }
+        
+        function showInfoMessage(message) {
+            const infoMsg = document.getElementById('infoMessage');
+            const successMsg = document.getElementById('successMessage');
+            successMsg.style.display = 'none';
+            infoMsg.textContent = message;
+            infoMsg.style.display = 'block';
         }
         
         function getDayML(padNumber) {
@@ -350,12 +374,14 @@
                     Telegram.WebApp.sendData(JSON.stringify({
                         action: 'reset'
                     }));
-                    currentTotalML = 0;
-                    document.getElementById('totalML').textContent = '0 мл';
-                    showSuccessMessage("Данные сброшены!");
+                    showInfoMessage("🔄 Сбрасываем данные...");
+                    // После сброса запрашиваем актуальную статистику
+                    setTimeout(() => {
+                        refreshStats();
+                    }, 1000);
                 } else {
                     currentTotalML = 0;
-                    document.getElementById('totalML').textContent = '0 мл';
+                    updateDisplay();
                     showSuccessMessage("Данные сброшены (демо-режим)!");
                 }
             }
@@ -366,10 +392,15 @@
             Telegram.WebApp.ready();
             Telegram.WebApp.expand();
             
-            // Показываем начальное значение
-            document.getElementById('totalML').textContent = '0 мл (нажмите "Обновить")';
+            // При открытии веб-приложения сразу запрашиваем актуальную статистику
+            showInfoMessage("🌐 Подключаемся к боту...");
+            setTimeout(() => {
+                refreshStats();
+            }, 1000);
+            
         } else {
-            document.getElementById('totalML').textContent = '0 мл (демо-режим)';
+            showInfoMessage("🔸 Демо-режим: данные сохраняются только локально");
+            updateDisplay();
         }
     </script>
 </body>
