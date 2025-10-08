@@ -380,29 +380,30 @@
         }
         
         async function sendToBotAPI(action, data) {
-            const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
-            const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+            debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
             
-            const messageData = {
-                chat_id: Telegram.WebApp.initDataUnsafe.user?.id,
-                text: `ACTION:${action}|${JSON.stringify(data)}`,
-                parse_mode: 'HTML'
-            };
+            if (!isTelegram) {
+                debugLog('Не в Telegram окружении - эмуляция отправки');
+                return true; // Для тестирования вне Telegram
+            }
             
             try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(messageData)
-                });
+                // Используем WebApp Data для отправки данных
+                const webAppData = {
+                    action: action,
+                    ...data
+                };
                 
-                const result = await response.json();
-                debugLog('Ответ от Bot API: ' + JSON.stringify(result));
-                return result.ok;
+                debugLog('Отправка данных через WebApp: ' + JSON.stringify(webAppData));
+                
+                // Отправляем данные через Telegram WebApp
+                Telegram.WebApp.sendData(JSON.stringify(webAppData));
+                
+                debugLog('Данные успешно отправлены через WebApp');
+                return true;
+                
             } catch (error) {
-                debugLog('Ошибка Bot API: ' + error);
+                debugLog('Ошибка отправки через WebApp: ' + error);
                 return false;
             }
         }
