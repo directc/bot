@@ -406,6 +406,44 @@
             const values = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5};
             return values[padNumber];
         }
+
+        // Добавьте эту функцию для обработки данных от бота
+        function handleBotResponse(data) {
+            try {
+                const response = JSON.parse(data);
+                
+                if (response.action === 'stats_response' || response.action === 'stats_updated') {
+                    updateDisplay(response.total_ml);
+                    showSuccessMessage(`✅ Данные обновлены: ${response.total_ml} мл`);
+                } else if (response.action === 'reset_complete') {
+                    updateDisplay(response.total_ml);
+                    showSuccessMessage('✅ Данные сброшены!');
+                }
+            } catch (e) {
+                console.log('Обычное сообщение от бота:', data);
+            }
+        }
+        
+        // Обновите инициализацию Telegram Web App
+        if (window.Telegram && Telegram.WebApp) {
+            isTelegram = true;
+            Telegram.WebApp.ready();
+            Telegram.WebApp.expand();
+            
+            // Обработчик данных от бота
+            Telegram.WebApp.onEvent('webAppDataReceived', (event) => {
+                if (event && event.data) {
+                    handleBotResponse(event.data);
+                }
+            });
+            
+            showInfoMessage("✅ Подключено к базе данных через бота");
+            
+            // При открытии запрашиваем актуальные данные
+            setTimeout(() => {
+                requestStats();
+            }, 1000);
+        }
         
         function resetData() {
             if (!isTelegram) {
