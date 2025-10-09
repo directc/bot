@@ -432,15 +432,20 @@
                     return;
                 }
                 
-                // Используем метод отправки сообщений Telegram WebApp
-                Telegram.WebApp.sendMessage(text, (error) => {
-                    if (error) {
-                        debugLog('Ошибка sendMessage: ' + JSON.stringify(error));
-                        reject(error);
-                    } else {
-                        resolve();
-                    }
-                });
+                try {
+                    // ПРАВИЛЬНЫЙ способ отправки данных через WebApp
+                    Telegram.WebApp.sendData(JSON.stringify({
+                        message_text: text,
+                        timestamp: Date.now()
+                    }));
+                    
+                    debugLog('Данные отправлены через sendData');
+                    resolve();
+                    
+                } catch (error) {
+                    debugLog('Ошибка sendData: ' + error);
+                    reject(error);
+                }
             });
         }
 
