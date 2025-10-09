@@ -6,7 +6,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        /* Стили остаются такими же */
         body {
             font-family: Arial, sans-serif;
             background: linear-gradient(135deg, #ffb6c1, #ff69b4);
@@ -98,10 +97,6 @@
         }
         .button.reset:hover {
             background: #5a6268;
-        }
-        .type-selector {
-            text-align: center;
-            margin: 15px 0;
         }
         .type-btn {
             background: #d63384;
@@ -270,8 +265,8 @@
         let isTelegram = false;
         let debugMode = false;
         let currentTotalML = 0;
+        let pendingRequests = {};
         
-        // URL изображений прокладок
         const padImages = {
             1: "https://directc.github.io/bot/images/pad1.png",
             2: "https://directc.github.io/bot/images/pad2.png", 
@@ -297,44 +292,119 @@
             debugLog('Режим отладки ' + (debugMode ? 'включен' : 'выключен'));
         }
         
-        // Функция для получения параметров из URL
-        function getUrlParams() {
-            const params = {};
-            const queryString = window.location.search.substring(1);
-            const pairs = queryString.split('&');
+        function cleanupPendingRequests() {
+            const now = Date.now();
+            Object.keys(pendingRequests).forEach(key => {
+                if (now - pendingRequests[key].timestamp > 30000) {
+                    delete pendingRequests[key];
+                    debugLog(`Удален устаревший запрос: ${key}`);
+                }
+            });
+        }
+        
+        // ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ В БОТ
+        async function sendToBotAPI(action, data) {
+            debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
             
-            for (let i = 0; i < pairs.length; i++) {
-                const pair = pairs[i].split('=');
-                if (pair[0]) {
-                    params[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1] || '');
+            if (!isTelegram) {
+                // Режим эмуляции
+                const mockTotal = currentTotalML + (data.ml || 0);
+                updateDisplay(mockTotal);
+                showSuccessMessage(`✅ Эмуляция: ${action} отправлен`);
+                return true;
+            }
+            
+            try {
+                const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                
+                pendingRequests[requestId] = {
+                    action: action,
+                    data: data,
+                    timestamp: Date.now()
+                };
+                
+                cleanupPendingRequests();
+                
+                const messageData = {
+                    action: action,
+                    request_id: requestId,
+                    ...data
+                };
+                
+                debugLog(`Отправка запроса ${requestId}: ${JSON.stringify(messageData)}`);
+                
+                // Отправляем данные через Telegram WebApp
+                Telegram.WebApp.sendData(JSON.stringify(messageData));
+                
+                showInfoMessage("📤 Отправляем запрос боту...");
+                return true;
+                
+            } catch (error) {
+                debugLog('Ошибка отправки: ' + error);
+                showErrorMessage('❌ Ошибка отправки данных');
+                return false;
+            }
+        }
+        
+        // ОБРАБОТЧИК ОТВЕТОВ ОТ БОТА
+        function handleBotResponse(response) {
+            debugLog(`Получен ответ от бота: ${JSON.stringify(response)}`);
+            
+            const { request_id, action, success, data, error } = response;
+            
+            if (request_id && pendingRequests[request_id]) {
+                const originalRequest = pendingRequests[request_id];
+                delete pendingRequests[request_id];
+                
+                if (success) {
+                    if (action === 'get_stats' || action === 'add_pad') {
+                        updateDisplay(data.total_ml);
+                        showSuccessMessage(`✅ ${data.message || 'Успешно!'}`);
+                    } else if (action === 'reset') {
+                        updateDisplay(0);
+                        showSuccessMessage('✅ Данные сброшены!');
+                    }
+                } else {
+                    showErrorMessage(`❌ Ошибка: ${error || 'Неизвестная ошибка'}`);
+                }
+            } else {
+                // Ответ без request_id (прямое обновление)
+                if (data && data.total_ml !== undefined) {
+                    updateDisplay(data.total_ml);
                 }
             }
-            return params;
+        }
+        
+        // ИНИЦИАЛИЗАЦИЯ ОБРАБОТЧИКА СООБЩЕНИЙ
+        function initBotMessageHandler() {
+            if (isTelegram) {
+                // Обработчик входящих сообщений от бота
+                Telegram.WebApp.onEvent('messageReceived', (message) => {
+                    try {
+                        debugLog(`Получено сообщение от Telegram: ${message}`);
+                        const data = JSON.parse(message);
+                        handleBotResponse(data);
+                    } catch (e) {
+                        debugLog('Ошибка парсинга входящего сообщения: ' + e);
+                    }
+                });
+                
+                debugLog('Обработчик сообщений от бота инициализирован');
+            }
         }
         
         function requestStats() {
             debugLog('Запрос статистики...');
             if (isTelegram) {
                 showInfoMessage("📊 Запрашиваем актуальные данные из базы...");
-                
-                sendToBotAPI('get_stats', {}).then(success => {
-                    if (success) {
-                        debugLog('Запрос статистики отправлен');
-                    } else {
-                        showErrorMessage("❌ Ошибка запроса статистики");
-                    }
-                });
-                
+                sendToBotAPI('get_stats', {});
             } else {
-                debugLog('Не в Telegram окружении');
                 showWarningMessage("⚠️ Функционал доступен только в Telegram");
             }
         }
         
         function selectPad(padNumber) {
             debugLog(`Выбрана прокладка №${padNumber}`);
-            debugLog(`isTelegram: ${isTelegram}`);
-            debugLog(`Telegram.WebApp: ${typeof Telegram.WebApp}`);
             
             if (!isTelegram) {
                 showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
@@ -344,10 +414,8 @@
             currentPad = padNumber;
             
             if (padNumber === 1) {
-                // Для прокладки 1 сразу добавляем +1 мл
                 addPad(1, 'day');
             } else {
-                // Показываем выбор типа для других прокладок
                 showTypeSelector(padNumber);
             }
         }
@@ -355,9 +423,7 @@
         function showTypeSelector(padNumber) {
             const dayML = getDayML(padNumber);
             const nightML = getNightML(padNumber);
-            debugLog(`Показ выбора типа для прокладки ${padNumber}: день=${dayML}мл, ночь=${nightML}мл`);
             
-            // Создаем модальное окно для выбора типа
             const modal = document.createElement('div');
             modal.className = 'modal';
             
@@ -382,82 +448,12 @@
             document.body.appendChild(modal);
         }
         
-        async function sendToBotAPI(action, data) {
-            debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
-            
-            if (!isTelegram) {
-                // Режим эмуляции
-                showSuccessMessage(`✅ Эмуляция: ${action} отправлен`);
-                return true;
-            }
-            
-            try {
-                // Формируем текстовое сообщение для бота
-                let messageText = '';
-                
-                if (action === 'add_pad') {
-                    const typeText = data.type === 'day' ? 'дневная' : 'ночная';
-                    messageText = `➕ Добавить прокладку: №${data.pad_number} (${typeText}, ${data.ml} мл)`;
-                } 
-                else if (action === 'get_stats') {
-                    messageText = '📊 Статистика';
-                }
-                else if (action === 'reset') {
-                    messageText = '🔄 Сбросить данные';
-                }
-                
-                // Отправляем как обычное сообщение через Telegram
-                await sendTelegramMessage(messageText);
-                
-                // Также отправляем структурированные данные для парсинга
-                const structuredData = `[PAD_DATA]${JSON.stringify({action, ...data})}[/PAD_DATA]`;
-                await sendTelegramMessage(structuredData);
-                
-                debugLog('Сообщения отправлены через Telegram');
-                return true;
-                
-            } catch (error) {
-                debugLog('Ошибка отправки: ' + error);
-                showErrorMessage('❌ Ошибка отправки данных');
-                return false;
-            }
-        }
-        
-        // Новая функция отправки сообщений через Telegram
-        async function sendTelegramMessage(text) {
-            return new Promise((resolve, reject) => {
-                if (!isTelegram) {
-                    console.log('Эмуляция Telegram:', text);
-                    resolve();
-                    return;
-                }
-                
-                try {
-                    // ПРАВИЛЬНЫЙ способ отправки данных через WebApp
-                    Telegram.WebApp.sendData(JSON.stringify({
-                        message_text: text,
-                        timestamp: Date.now()
-                    }));
-                    
-                    debugLog('Данные отправлены через sendData');
-                    resolve();
-                    
-                } catch (error) {
-                    debugLog('Ошибка sendData: ' + error);
-                    reject(error);
-                }
-            });
-        }
-
-        // Обновите функцию addPad
         function addPad(padNumber, type) {
             const ml = type === 'day' ? getDayML(padNumber) : getNightML(padNumber);
             debugLog(`Добавление прокладки: №${padNumber}, тип=${type}, мл=${ml}`);
             
-            // Блокируем интерфейс
             setLoading(true);
             
-            // Удаляем модальное окно если есть
             const modal = document.querySelector('.modal');
             if (modal) modal.remove();
             
@@ -467,55 +463,13 @@
                 ml: ml
             };
             
-            debugLog('Отправка данных: ' + JSON.stringify(data));
-            
             sendToBotAPI('add_pad', data).then(success => {
-                if (success) {
-                    showInfoMessage(`📤 Отправляем данные в базу: ${ml} мл...`);
-                    // WebApp закроется после отправки данных
-                } else {
+                if (!success) {
                     setLoading(false);
                     showErrorMessage("❌ Ошибка отправки данных");
                 }
             });
         }
-    
-    // Добавьте эту функцию для проверки состояния бота
-    function checkBotStatus() {
-        debugLog('Проверка статуса бота...');
-        // Можно добавить ping или другую проверку
-    }
-    
-    // Добавьте в конец инициализации
-    if (window.Telegram && Telegram.WebApp) {
-        isTelegram = true;
-        Telegram.WebApp.ready();
-        Telegram.WebApp.expand();
-        
-        debugLog('Telegram WebApp инициализирован');
-        debugLog('Версия Telegram WebApp: ' + Telegram.WebApp.version);
-        debugLog('Платформа: ' + Telegram.WebApp.platform);
-        
-        // Проверяем параметры URL для автоматического обновления
-        const params = getUrlParams();
-        if (params.refresh) {
-            const totalML = parseInt(params.refresh);
-            updateDisplay(totalML);
-            showSuccessMessage(`✅ Данные обновлены: ${totalML} мл`);
-            debugLog(`Автоматическое обновление из URL: ${totalML} мл`);
-        } else {
-            showInfoMessage("✅ Подключено к базе данных через бота");
-            // При открытии запрашиваем актуальные данные
-            setTimeout(() => {
-                requestStats();
-            }, 1000);
-        }
-        
-    } else {
-        debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
-        showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
-        document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
-    }
         
         function updateDisplay(totalML) {
             currentTotalML = totalML;
@@ -530,11 +484,9 @@
             if (loading) {
                 padGrid.classList.add('loading');
                 buttons.forEach(btn => btn.classList.add('loading'));
-                debugLog('Интерфейс заблокирован');
             } else {
                 padGrid.classList.remove('loading');
                 buttons.forEach(btn => btn.classList.remove('loading'));
-                debugLog('Интерфейс разблокирован');
             }
         }
         
@@ -543,7 +495,6 @@
             const successMsg = document.getElementById('successMessage');
             successMsg.textContent = message;
             successMsg.style.display = 'block';
-            debugLog('Показано успешное сообщение: ' + message);
         }
         
         function showInfoMessage(message) {
@@ -551,7 +502,6 @@
             const infoMsg = document.getElementById('infoMessage');
             infoMsg.textContent = message;
             infoMsg.style.display = 'block';
-            debugLog('Показано информационное сообщение: ' + message);
         }
         
         function showWarningMessage(message) {
@@ -559,7 +509,6 @@
             const warningMsg = document.getElementById('warningMessage');
             warningMsg.textContent = message;
             warningMsg.style.display = 'block';
-            debugLog('Показано предупреждение: ' + message);
         }
         
         function showErrorMessage(message) {
@@ -567,7 +516,6 @@
             const errorMsg = document.getElementById('errorMessage');
             errorMsg.textContent = message;
             errorMsg.style.display = 'block';
-            debugLog('Показано сообщение об ошибке: ' + message);
         }
         
         function hideAllMessages() {
@@ -596,12 +544,7 @@
             
             if (confirm('Точно сбросить все данные в базе?')) {
                 sendToBotAPI('reset', {}).then(success => {
-                    if (success) {
-                        showInfoMessage("🔄 Сбрасываем данные в базе...");
-                        setTimeout(() => {
-                            requestStats();
-                        }, 2000);
-                    } else {
+                    if (!success) {
                         showErrorMessage("❌ Ошибка сброса данных");
                     }
                 });
@@ -616,40 +559,31 @@
             }
         }
         
-        // Инициализация веб-приложения
-        if (window.Telegram && Telegram.WebApp) {
-            isTelegram = true;
-            Telegram.WebApp.ready();
-            Telegram.WebApp.expand();
-            
-            debugLog('Telegram WebApp инициализирован');
-            
-            // Проверяем параметры URL для автоматического обновления
-            const params = getUrlParams();
-            if (params.refresh) {
-                const totalML = parseInt(params.refresh);
-                updateDisplay(totalML);
-                showSuccessMessage(`✅ Данные обновлены: ${totalML} мл`);
-                debugLog(`Автоматическое обновление из URL: ${totalML} мл`);
-            } else {
-                showInfoMessage("✅ Подключено к базе данных через бота");
-                // При открытии запрашиваем актуальные данные
+        // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.Telegram && Telegram.WebApp) {
+                isTelegram = true;
+                Telegram.WebApp.ready();
+                Telegram.WebApp.expand();
+                
+                debugLog('Telegram WebApp инициализирован');
+                debugLog('Версия: ' + Telegram.WebApp.version);
+                debugLog('Платформа: ' + Telegram.WebApp.platform);
+                
+                // Инициализируем обработчик сообщений
+                initBotMessageHandler();
+                
+                // Запрашиваем статистику при загрузке
                 setTimeout(() => {
                     requestStats();
                 }, 1000);
+                
+            } else {
+                debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
+                showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
+                document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
             }
-            // === ДОБАВЬТЕ ЗДЕСЬ ===
-            debugLog('Инициализация завершена');
-            debugLog('isTelegram: ' + isTelegram);
-            debugLog('WebApp version: ' + Telegram.WebApp.version);
-            debugLog('Platform: ' + Telegram.WebApp.platform);
-            debugLog('User ID: ' + (Telegram.WebApp.initDataUnsafe.user?.id || 'не доступно'));
-            // === КОНЕЦ ДОБАВЛЕНИЯ ===
-        } else {
-            debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
-            showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
-            document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
-        }
+        });
     </script>
 </body>
 </html>
