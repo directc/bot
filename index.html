@@ -267,6 +267,7 @@
         let debugMode = false;
         let currentTotalML = 0;
         let userId = null;
+        let chatId = null;
         
         const padImages = {
             1: "https://directc.github.io/bot/images/pad1.png",
@@ -275,6 +276,9 @@
             4: "https://directc.github.io/bot/images/pad4.png",
             5: "https://directc.github.io/bot/images/pad5.png"
         };
+        
+        // Токен бота - ВАЖНО: в продакшене это должно быть защищено!
+        const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
         
         function debugLog(message) {
             console.log('[DEBUG]', message);
@@ -293,17 +297,19 @@
             debugLog('Режим отладки ' + (debugMode ? 'включен' : 'выключен'));
         }
         
-        // ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ В БОТ
+        // ОСНОВНАЯ ФУНКЦИЯ ОТПРАВКИ В БОТ ЧЕРЕЗ BOT API
         async function sendToBotAPI(action, data) {
             debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
             
-            if (!isTelegram) {
+            if (!isTelegram || !userId) {
                 showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
                 return false;
             }
             
             try {
-                // Формируем данные для отправки через Telegram WebApp
+                const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+                
+                // Формируем сообщение в формате [WEBAPP_ACTION]{...}[/WEBAPP_ACTION]
                 const webappData = {
                     action: action,
                     ...data
@@ -311,18 +317,77 @@
                 
                 const messageText = `[WEBAPP_ACTION]${JSON.stringify(webappData)}[/WEBAPP_ACTION]`;
                 
-                debugLog(`Отправка через Telegram WebApp: ${messageText}`);
+                const messageData = {
+                    chat_id: userId, // Отправляем самому себе (бот получит это сообщение)
+                    text: messageText,
+                    parse_mode: 'HTML'
+                };
                 
-                // Отправляем данные через Telegram WebApp
-                Telegram.WebApp.sendData(messageText);
+                debugLog(`Отправка через Bot API: ${JSON.stringify(messageData)}`);
                 
-                showInfoMessage("📤 Отправляем запрос боту...");
-                return true;
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(messageData)
+                });
+                
+                const result = await response.json();
+                debugLog('Ответ от Bot API: ' + JSON.stringify(result));
+                
+                if (result.ok) {
+                    showInfoMessage("📤 Запрос отправлен боту...");
+                    
+                    // Ждем ответа от бота
+                    setTimeout(() => {
+                        checkForBotResponse();
+                    }, 2000);
+                    
+                    return true;
+                } else {
+                    showErrorMessage("❌ Ошибка отправки: " + (result.description || 'Неизвестная ошибка'));
+                    return false;
+                }
                 
             } catch (error) {
-                debugLog('Ошибка отправки через Telegram WebApp: ' + error);
-                showErrorMessage('❌ Ошибка отправки данных');
+                debugLog('Ошибка Bot API: ' + error);
+                showErrorMessage('❌ Ошибка соединения с ботом');
                 return false;
+            }
+        }
+        
+        // Функция для проверки ответов от бота
+        async function checkForBotResponse() {
+            debugLog('Проверка ответов от бота...');
+            
+            try {
+                const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates`;
+                
+                const response = await fetch(url);
+                const result = await response.json();
+                
+                if (result.ok) {
+                    // Ищем сообщения от бота с WebApp response
+                    const messages = result.result || [];
+                    debugLog(`Получено сообщений: ${messages.length}`);
+                    
+                    for (let i = messages.length - 1; i >= 0; i--) {
+                        const message = messages[i];
+                        if (message.message && 
+                            message.message.from && 
+                            message.message.from.id.toString() === BOT_TOKEN.split(':')[0] && // Проверяем что от бота
+                            message.message.text && 
+                            message.message.text.includes('[WEBAPP_RESPONSE]')) {
+                            
+                            debugLog('Найден ответ от бота: ' + message.message.text);
+                            handleBotMessage(message.message.text);
+                            break;
+                        }
+                    }
+                }
+            } catch (error) {
+                debugLog('Ошибка проверки ответов: ' + error);
             }
         }
         
@@ -534,19 +599,18 @@
                 
                 // Получаем ID пользователя
                 userId = Telegram.WebApp.initDataUnsafe.user?.id;
+                chatId = Telegram.WebApp.initDataUnsafe.chat?.id;
                 
                 debugLog('Telegram WebApp инициализирован');
                 debugLog('Версия: ' + Telegram.WebApp.version);
                 debugLog('Платформа: ' + Telegram.WebApp.platform);
                 debugLog('User ID: ' + (userId || 'не доступен'));
+                debugLog('Chat ID: ' + (chatId || 'не доступен'));
                 
                 if (!userId) {
                     showErrorMessage("❌ Не удалось получить ID пользователя");
                     return;
                 }
-                
-                // Настраиваем обработчик входящих сообщений
-                Telegram.WebApp.onEvent('messageText', handleBotMessage);
                 
                 // Запрашиваем статистику при загрузке
                 setTimeout(() => {
