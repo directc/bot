@@ -520,4 +520,59 @@
         function resetData() {
             debugLog('Запрос сброса данных');
             if (!isTelegram) {
-                showWarningMessage("⚠️ Для работы с базой данных от
+                showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
+                return;
+            }
+            
+            if (confirm('Точно сбросить все данные в базе?')) {
+                setLoading(true);
+                sendToBotAPI('reset', {}).then(success => {
+                    if (!success) {
+                        setLoading(false);
+                    }
+                });
+            }
+        }
+        
+        function closeWebApp() {
+            if (isTelegram) {
+                Telegram.WebApp.close();
+            } else {
+                showInfoMessage("✅ Работа завершена");
+            }
+        }
+        
+        // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.Telegram && Telegram.WebApp) {
+                isTelegram = true;
+                Telegram.WebApp.ready();
+                Telegram.WebApp.expand();
+                
+                // Получаем ID пользователя
+                userId = Telegram.WebApp.initDataUnsafe.user?.id;
+                
+                debugLog('Telegram WebApp инициализирован');
+                debugLog('Версия: ' + Telegram.WebApp.version);
+                debugLog('Платформа: ' + Telegram.WebApp.platform);
+                debugLog('User ID: ' + (userId || 'не доступен'));
+                
+                if (!userId) {
+                    showErrorMessage("❌ Не удалось получить ID пользователя");
+                    return;
+                }
+                
+                // Запрашиваем статистику при загрузке
+                setTimeout(() => {
+                    requestStats();
+                }, 1000);
+                
+            } else {
+                debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
+                showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
+                document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
+            }
+        });
+    </script>
+</body>
+</html>
