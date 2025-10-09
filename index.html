@@ -266,7 +266,7 @@
         let isTelegram = false;
         let debugMode = false;
         let currentTotalML = 0;
-        let pendingRequests = {};
+        let userId = null;
         
         const padImages = {
             1: "https://directc.github.io/bot/images/pad1.png",
@@ -297,51 +297,50 @@
         async function sendToBotAPI(action, data) {
             debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
             
-            if (!isTelegram) {
+            if (!isTelegram || !userId) {
                 showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
                 return false;
             }
             
             try {
-                const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
+                const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
                 
-                pendingRequests[requestId] = {
-                    action: action,
-                    data: data,
-                    timestamp: Date.now()
-                };
-                
-                cleanupPendingRequests();
+                // Формируем сообщение в формате ACTION:action|{json_data}
+                const messageText = `ACTION:${action}|${JSON.stringify(data)}`;
                 
                 const messageData = {
-                    action: action,
-                    request_id: requestId,
-                    ...data
+                    chat_id: userId,
+                    text: messageText,
+                    parse_mode: 'HTML'
                 };
                 
-                debugLog(`Отправка запроса ${requestId}: ${JSON.stringify(messageData)}`);
+                debugLog(`Отправка через Bot API: ${JSON.stringify(messageData)}`);
                 
-                // ОТПРАВЛЯЕМ КАК ТЕКСТОВОЕ СООБЩЕНИЕ через Telegram WebApp
-                Telegram.WebApp.sendData(JSON.stringify(messageData));
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(messageData)
+                });
                 
-                showInfoMessage("📤 Отправляем запрос боту...");
-                return true;
+                const result = await response.json();
+                debugLog('Ответ от Bot API: ' + JSON.stringify(result));
+                
+                if (result.ok) {
+                    showInfoMessage("📤 Запрос отправлен боту...");
+                    return true;
+                } else {
+                    showErrorMessage("❌ Ошибка отправки: " + (result.description || 'Неизвестная ошибка'));
+                    return false;
+                }
                 
             } catch (error) {
-                debugLog('Ошибка отправки: ' + error);
-                showErrorMessage('❌ Ошибка отправки данных');
+                debugLog('Ошибка Bot API: ' + error);
+                showErrorMessage('❌ Ошибка соединения с ботом');
                 return false;
             }
-        }
-        
-        function cleanupPendingRequests() {
-            const now = Date.now();
-            Object.keys(pendingRequests).forEach(key => {
-                if (now - pendingRequests[key].timestamp > 30000) {
-                    delete pendingRequests[key];
-                    debugLog(`Удален устаревший запрос: ${key}`);
-                }
-            });
         }
         
         // ОБРАБОТЧИК ВХОДЯЩИХ СООБЩЕНИЙ ОТ БОТА
@@ -364,30 +363,20 @@
         function handleBotResponse(response) {
             debugLog(`Обработка ответа от бота: ${JSON.stringify(response)}`);
             
-            const { request_id, action, success, data, error } = response;
+            const { action, success, data, error } = response;
             
             setLoading(false);
             
-            if (request_id && pendingRequests[request_id]) {
-                const originalRequest = pendingRequests[request_id];
-                delete pendingRequests[request_id];
-                
-                if (success) {
-                    if (action === 'get_stats' || action === 'add_pad') {
-                        updateDisplay(data.total_ml);
-                        showSuccessMessage(data.message || '✅ Успешно!');
-                    } else if (action === 'reset') {
-                        updateDisplay(0);
-                        showSuccessMessage('✅ Данные сброшены!');
-                    }
-                } else {
-                    showErrorMessage(`❌ Ошибка: ${error || 'Неизвестная ошибка'}`);
+            if (success) {
+                if (action === 'get_stats' || action === 'add_pad') {
+                    updateDisplay(data.total_ml);
+                    showSuccessMessage(data.message || '✅ Успешно!');
+                } else if (action === 'reset') {
+                    updateDisplay(0);
+                    showSuccessMessage('✅ Данные сброшены!');
                 }
             } else {
-                // Ответ без request_id
-                if (data && data.total_ml !== undefined) {
-                    updateDisplay(data.total_ml);
-                }
+                showErrorMessage(`❌ Ошибка: ${error || 'Неизвестная ошибка'}`);
             }
         }
         
@@ -531,53 +520,4 @@
         function resetData() {
             debugLog('Запрос сброса данных');
             if (!isTelegram) {
-                showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
-                return;
-            }
-            
-            if (confirm('Точно сбросить все данные в базе?')) {
-                setLoading(true);
-                sendToBotAPI('reset', {}).then(success => {
-                    if (!success) {
-                        setLoading(false);
-                    }
-                });
-            }
-        }
-        
-        function closeWebApp() {
-            if (isTelegram) {
-                Telegram.WebApp.close();
-            } else {
-                showInfoMessage("✅ Работа завершена");
-            }
-        }
-        
-        // ИНИЦИАЛИЗАЦИЯ ПРИ ЗАГРУЗКЕ
-        document.addEventListener('DOMContentLoaded', function() {
-            if (window.Telegram && Telegram.WebApp) {
-                isTelegram = true;
-                Telegram.WebApp.ready();
-                Telegram.WebApp.expand();
-                
-                debugLog('Telegram WebApp инициализирован');
-                debugLog('Версия: ' + Telegram.WebApp.version);
-                debugLog('Платформа: ' + Telegram.WebApp.platform);
-                
-                // Настраиваем обработчик входящих сообщений
-                Telegram.WebApp.onEvent('messageText', handleBotMessage);
-                
-                // Запрашиваем статистику при загрузке
-                setTimeout(() => {
-                    requestStats();
-                }, 1000);
-                
-            } else {
-                debugLog('Telegram WebApp не обнаружен - работа в браузерном режиме');
-                showWarningMessage("⚠️ Откройте это приложение в Telegram для работы с базой данных");
-                document.getElementById('totalML').textContent = '0 мл (только в Telegram)';
-            }
-        });
-    </script>
-</body>
-</html>
+                showWarningMessage("⚠️ Для работы с базой данных от
