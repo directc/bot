@@ -297,48 +297,31 @@
         async function sendToBotAPI(action, data) {
             debugLog(`Отправка действия: ${action}, данные: ${JSON.stringify(data)}`);
             
-            if (!isTelegram || !userId) {
+            if (!isTelegram) {
                 showWarningMessage("⚠️ Для работы с базой данных откройте приложение в Telegram");
                 return false;
             }
             
             try {
-                const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
-                const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-                
-                // Формируем сообщение в формате ACTION:action|{json_data}
-                const messageText = `ACTION:${action}|${JSON.stringify(data)}`;
-                
-                const messageData = {
-                    chat_id: userId,
-                    text: messageText,
-                    parse_mode: 'HTML'
+                // Формируем данные для отправки через Telegram WebApp
+                const webappData = {
+                    action: action,
+                    ...data
                 };
                 
-                debugLog(`Отправка через Bot API: ${JSON.stringify(messageData)}`);
+                const messageText = `[WEBAPP_ACTION]${JSON.stringify(webappData)}[/WEBAPP_ACTION]`;
                 
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(messageData)
-                });
+                debugLog(`Отправка через Telegram WebApp: ${messageText}`);
                 
-                const result = await response.json();
-                debugLog('Ответ от Bot API: ' + JSON.stringify(result));
+                // Отправляем данные через Telegram WebApp
+                Telegram.WebApp.sendData(messageText);
                 
-                if (result.ok) {
-                    showInfoMessage("📤 Запрос отправлен боту...");
-                    return true;
-                } else {
-                    showErrorMessage("❌ Ошибка отправки: " + (result.description || 'Неизвестная ошибка'));
-                    return false;
-                }
+                showInfoMessage("📤 Отправляем запрос боту...");
+                return true;
                 
             } catch (error) {
-                debugLog('Ошибка Bot API: ' + error);
-                showErrorMessage('❌ Ошибка соединения с ботом');
+                debugLog('Ошибка отправки через Telegram WebApp: ' + error);
+                showErrorMessage('❌ Ошибка отправки данных');
                 return false;
             }
         }
@@ -561,6 +544,9 @@
                     showErrorMessage("❌ Не удалось получить ID пользователя");
                     return;
                 }
+                
+                // Настраиваем обработчик входящих сообщений
+                Telegram.WebApp.onEvent('messageText', handleBotMessage);
                 
                 // Запрашиваем статистику при загрузке
                 setTimeout(() => {
