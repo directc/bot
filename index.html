@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Трекер менструации</title>
+    <title>Трекер менструации v1.1</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
@@ -267,7 +267,7 @@
         let debugMode = false;
         let currentTotalML = 0;
         let userId = null;
-        let chatId = null;
+        let lastUpdateId = 0;
         
         const padImages = {
             1: "https://directc.github.io/bot/images/pad1.png",
@@ -277,7 +277,7 @@
             5: "https://directc.github.io/bot/images/pad5.png"
         };
         
-        // Токен бота - ВАЖНО: в продакшене это должно быть защищено!
+        // Токен бота
         const BOT_TOKEN = '8374575432:AAFf3YU3PtvQ3Ja44hFynDrZLTetgMTaMBM';
         
         function debugLog(message) {
@@ -318,7 +318,7 @@
                 const messageText = `[WEBAPP_ACTION]${JSON.stringify(webappData)}[/WEBAPP_ACTION]`;
                 
                 const messageData = {
-                    chat_id: userId, // Отправляем самому себе (бот получит это сообщение)
+                    chat_id: userId, // Отправляем самому себе
                     text: messageText,
                     parse_mode: 'HTML'
                 };
@@ -339,11 +339,8 @@
                 if (result.ok) {
                     showInfoMessage("📤 Запрос отправлен боту...");
                     
-                    // Ждем ответа от бота
-                    setTimeout(() => {
-                        checkForBotResponse();
-                    }, 2000);
-                    
+                    // Запускаем периодическую проверку ответов
+                    startPollingForResponses();
                     return true;
                 } else {
                     showErrorMessage("❌ Ошибка отправки: " + (result.description || 'Неизвестная ошибка'));
@@ -357,38 +354,71 @@
             }
         }
         
+        // Функция для периодической проверки ответов от бота
+        let pollingInterval = null;
+        
+        function startPollingForResponses() {
+            debugLog('Запуск периодической проверки ответов...');
+            
+            // Останавливаем предыдущий интервал, если он был
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            // Проверяем ответы каждые 2 секунды в течение 30 секунд
+            let attempts = 0;
+            const maxAttempts = 15; // 15 попыток * 2 секунды = 30 секунд
+            
+            pollingInterval = setInterval(async () => {
+                attempts++;
+                debugLog(`Проверка ответов (попытка ${attempts}/${maxAttempts})...`);
+                
+                const hasResponse = await checkForBotResponse();
+                
+                if (hasResponse || attempts >= maxAttempts) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    if (attempts >= maxAttempts && !hasResponse) {
+                        showErrorMessage("❌ Бот не ответил в течение 30 секунд");
+                        setLoading(false);
+                    }
+                }
+            }, 2000);
+        }
+        
         // Функция для проверки ответов от бота
         async function checkForBotResponse() {
-            debugLog('Проверка ответов от бота...');
-            
             try {
-                const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates`;
+                const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=1`;
                 
                 const response = await fetch(url);
                 const result = await response.json();
                 
                 if (result.ok) {
-                    // Ищем сообщения от бота с WebApp response
-                    const messages = result.result || [];
-                    debugLog(`Получено сообщений: ${messages.length}`);
+                    const updates = result.result || [];
+                    debugLog(`Получено обновлений: ${updates.length}`);
                     
-                    for (let i = messages.length - 1; i >= 0; i--) {
-                        const message = messages[i];
-                        if (message.message && 
-                            message.message.from && 
-                            message.message.from.id.toString() === BOT_TOKEN.split(':')[0] && // Проверяем что от бота
-                            message.message.text && 
-                            message.message.text.includes('[WEBAPP_RESPONSE]')) {
+                    for (let update of updates) {
+                        if (update.update_id > lastUpdateId) {
+                            lastUpdateId = update.update_id;
+                        }
+                        
+                        if (update.message && 
+                            update.message.chat && 
+                            update.message.chat.id.toString() === userId.toString() &&
+                            update.message.text && 
+                            update.message.text.includes('[WEBAPP_RESPONSE]')) {
                             
-                            debugLog('Найден ответ от бота: ' + message.message.text);
-                            handleBotMessage(message.message.text);
-                            break;
+                            debugLog('Найден ответ от бота: ' + update.message.text);
+                            handleBotMessage(update.message.text);
+                            return true;
                         }
                     }
                 }
             } catch (error) {
                 debugLog('Ошибка проверки ответов: ' + error);
             }
+            return false;
         }
         
         // ОБРАБОТЧИК ВХОДЯЩИХ СООБЩЕНИЙ ОТ БОТА
@@ -402,10 +432,12 @@
                     const responseData = JSON.parse(match[1]);
                     debugLog(`Распарсен WebApp ответ: ${JSON.stringify(responseData)}`);
                     handleBotResponse(responseData);
+                    return true;
                 } catch (e) {
                     debugLog('Ошибка парсинга WebApp ответа: ' + e);
                 }
             }
+            return false;
         }
         
         function handleBotResponse(response) {
@@ -599,13 +631,11 @@
                 
                 // Получаем ID пользователя
                 userId = Telegram.WebApp.initDataUnsafe.user?.id;
-                chatId = Telegram.WebApp.initDataUnsafe.chat?.id;
                 
                 debugLog('Telegram WebApp инициализирован');
                 debugLog('Версия: ' + Telegram.WebApp.version);
                 debugLog('Платформа: ' + Telegram.WebApp.platform);
                 debugLog('User ID: ' + (userId || 'не доступен'));
-                debugLog('Chat ID: ' + (chatId || 'не доступен'));
                 
                 if (!userId) {
                     showErrorMessage("❌ Не удалось получить ID пользователя");
