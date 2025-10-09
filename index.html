@@ -200,7 +200,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🌸 Трекер менструации v1.4</h1>
+            <h1>🌸 Трекер менструации v1.5</h1>
             <p>Выбери прокладку</p>
         </div>
         
@@ -267,6 +267,7 @@
         let debugMode = false;
         let currentTotalML = 0;
         let userId = null;
+        let lastUpdateId = 0;
         
         const padImages = {
             1: "https://directc.github.io/bot/images/pad1.png",
@@ -317,7 +318,7 @@
                 const messageText = `[WEBAPP_ACTION]${JSON.stringify(webappData)}[/WEBAPP_ACTION]`;
                 
                 const messageData = {
-                    chat_id: userId,
+                    chat_id: userId, // Отправляем самому себе
                     text: messageText,
                     parse_mode: 'HTML'
                 };
@@ -338,33 +339,124 @@
                 if (result.ok) {
                     showInfoMessage("📤 Запрос отправлен боту...");
                     
-                    // Просто ждем некоторое время и показываем успех (упрощенный подход)
-                    setTimeout(() => {
-                        setLoading(false);
-                        showSuccessMessage("✅ Запрос обработан!");
-                        
-                        // Для статистики обновляем данные через 2 секунды
-                        if (action === 'get_stats') {
-                            setTimeout(() => {
-                                // В реальном приложении здесь должен быть ответ от бота
-                                // Пока просто эмулируем успех
-                                updateDisplay(currentTotalML + (data.ml || 0));
-                            }, 1000);
-                        }
-                    }, 2000);
-                    
+                    // Запускаем периодическую проверку ответов
+                    startPollingForResponses();
                     return true;
                 } else {
                     showErrorMessage("❌ Ошибка отправки: " + (result.description || 'Неизвестная ошибка'));
-                    setLoading(false);
                     return false;
                 }
                 
             } catch (error) {
                 debugLog('Ошибка Bot API: ' + error);
                 showErrorMessage('❌ Ошибка соединения с ботом');
-                setLoading(false);
                 return false;
+            }
+        }
+        
+        // Функция для периодической проверки ответов от бота
+        let pollingInterval = null;
+        
+        function startPollingForResponses() {
+            debugLog('Запуск периодической проверки ответов...');
+            
+            // Останавливаем предыдущий интервал, если он был
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            // Проверяем ответы каждые 2 секунды в течение 30 секунд
+            let attempts = 0;
+            const maxAttempts = 15; // 15 попыток * 2 секунды = 30 секунд
+            
+            pollingInterval = setInterval(async () => {
+                attempts++;
+                debugLog(`Проверка ответов (попытка ${attempts}/${maxAttempts})...`);
+                
+                const hasResponse = await checkForBotResponse();
+                
+                if (hasResponse || attempts >= maxAttempts) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    if (attempts >= maxAttempts && !hasResponse) {
+                        showErrorMessage("❌ Бот не ответил в течение 30 секунд");
+                        setLoading(false);
+                    }
+                }
+            }, 2000);
+        }
+        
+        // Функция для проверки ответов от бота
+        async function checkForBotResponse() {
+            try {
+                const url = `https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=${lastUpdateId + 1}&timeout=1`;
+                
+                const response = await fetch(url);
+                const result = await response.json();
+                
+                if (result.ok) {
+                    const updates = result.result || [];
+                    debugLog(`Получено обновлений: ${updates.length}`);
+                    
+                    for (let update of updates) {
+                        if (update.update_id > lastUpdateId) {
+                            lastUpdateId = update.update_id;
+                        }
+                        
+                        if (update.message && 
+                            update.message.chat && 
+                            update.message.chat.id.toString() === userId.toString() &&
+                            update.message.text && 
+                            update.message.text.includes('[WEBAPP_RESPONSE]')) {
+                            
+                            debugLog('Найден ответ от бота: ' + update.message.text);
+                            handleBotMessage(update.message.text);
+                            return true;
+                        }
+                    }
+                }
+            } catch (error) {
+                debugLog('Ошибка проверки ответов: ' + error);
+            }
+            return false;
+        }
+        
+        // ОБРАБОТЧИК ВХОДЯЩИХ СООБЩЕНИЙ ОТ БОТА
+        function handleBotMessage(text) {
+            debugLog(`Получено сообщение от бота: ${text}`);
+            
+            // Пытаемся найти WebApp response
+            const match = text.match(/\[WEBAPP_RESPONSE\](.*?)\[\/WEBAPP_RESPONSE\]/);
+            if (match) {
+                try {
+                    const responseData = JSON.parse(match[1]);
+                    debugLog(`Распарсен WebApp ответ: ${JSON.stringify(responseData)}`);
+                    handleBotResponse(responseData);
+                    return true;
+                } catch (e) {
+                    debugLog('Ошибка парсинга WebApp ответа: ' + e);
+                }
+            }
+            return false;
+        }
+        
+        function handleBotResponse(response) {
+            debugLog(`Обработка ответа от бота: ${JSON.stringify(response)}`);
+            
+            const { action, success, data, error } = response;
+            
+            setLoading(false);
+            
+            if (success) {
+                if (action === 'get_stats' || action === 'add_pad') {
+                    updateDisplay(data.total_ml);
+                    showSuccessMessage(data.message || '✅ Успешно!');
+                } else if (action === 'reset') {
+                    updateDisplay(0);
+                    showSuccessMessage('✅ Данные сброшены!');
+                }
+            } else {
+                showErrorMessage(`❌ Ошибка: ${error || 'Неизвестная ошибка'}`);
             }
         }
         
@@ -435,10 +527,8 @@
             };
             
             sendToBotAPI('add_pad', data).then(success => {
-                if (success) {
-                    // Обновляем отображение локально
-                    currentTotalML += ml;
-                    updateDisplay(currentTotalML);
+                if (!success) {
+                    setLoading(false);
                 }
             });
         }
@@ -467,9 +557,6 @@
             const successMsg = document.getElementById('successMessage');
             successMsg.textContent = message;
             successMsg.style.display = 'block';
-            setTimeout(() => {
-                successMsg.style.display = 'none';
-            }, 3000);
         }
         
         function showInfoMessage(message) {
@@ -491,9 +578,6 @@
             const errorMsg = document.getElementById('errorMessage');
             errorMsg.textContent = message;
             errorMsg.style.display = 'block';
-            setTimeout(() => {
-                errorMsg.style.display = 'none';
-            }, 5000);
         }
         
         function hideAllMessages() {
@@ -523,9 +607,8 @@
             if (confirm('Точно сбросить все данные в базе?')) {
                 setLoading(true);
                 sendToBotAPI('reset', {}).then(success => {
-                    if (success) {
-                        currentTotalML = 0;
-                        updateDisplay(0);
+                    if (!success) {
+                        setLoading(false);
                     }
                 });
             }
